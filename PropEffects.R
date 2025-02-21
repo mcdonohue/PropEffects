@@ -47,17 +47,17 @@ results <-
       bind_rows()
 
 ## Figure 1. Power for cross-sectional model ----
-# Simulated power (and type I error when $\\delta$ = 0) for the proportional 
-# model and two-sample t-test based on 10,000 simulations. The control group 
-# mean is $\\beta_C$ and $\\delta$ is the mean group difference. 
-# With $\\beta_C = 0$, the proportional effect is not identifiable, and 
-# simulated power with the proportional test is about 5% regardless of $\\delta$. 
-# With $\\beta_C$ near zero ($\\beta_C=-0.5$ or $-1$), the proportional test 
-# appears to have better power with $\\delta>0$, and worse power with $\\delta<0$. 
-# With $\\beta_C$ far from zero ($\\beta_C=-100$), power for the two methods is 
-# identical and the lines are overlapping. Residual variance was simulated to be 
-# one, sample size was 50 per group, and the proportional model was fit with R's 
-# nonlinear least squares (\\texttt{nls}) function.[@bates1992]
+# Simulated power (and type I error when $\delta$= 0) for the proportional model 
+# and two-sample $t$-test based on 10,000 simulations. The control group mean is 
+# $\beta_C$ and $\delta$ is the mean group difference. With $\beta_C = 0$, the 
+# proportional effect is not identifiable, and simulated power with the 
+# proportional test is about 5\% regardless of $\delta$. With $\beta_C$ near 
+# zero ($\beta_C=-0.5$ or $-1$), the proportional test appears to have better 
+#power with $\delta>0$, and worse power with $\delta<0$. With $\beta_C$ far from 
+#zero ($\beta_C=-100$), power for the two methods is identical and the lines are 
+#overlapping. Residual variance was simulated to be one, sample size was 50 per 
+#group, and the proportional model was fit with R's nonlinear least squares 
+#(\texttt{nls}) function \citep{bates1992}.
 sum.results <- results %>%
   group_by(Beta, Delta, Approach) %>%
   summarise(
@@ -85,21 +85,21 @@ sum.results %>%
     scale_color_manual(values = ggsci::pal_nejm()(n=5)[4:5])
 
 
-## Figure 2. Zipper plots for cross-sectional model
-# Zipper plots [@morris2019using] showing estimates and 95% confidence intervals 
-# for cross-sectional simulations with control group mean $\\beta_C=-0.5$. 
-# The top row has a treatment effect of $\\delta=0$, and demonstrates Type I error. 
-# The bottom row has a treatment effect of $\\delta=0.3$, or equivalently, a 
-# proportional effect $\\theta = 0.6$. The intervals are sorted so that those 
+## Figure 2. Zipper plots for cross-sectional model ----
+# Zipper plots showing estimates and 95\% confidence intervals for 
+# cross-sectional simulations with control group mean $\beta_C=-0.5$. The top 
+# row has a treatment effect of $\delta=0$ and demonstrates Type I error. The 
+# bottom row has a treatment effect of $\delta=0.3$, or equivalently, a 
+# proportional effect $\theta = 0.6$. The intervals are sorted so that those 
 # associated with the largest standardized bias are toward the top of each panel, 
-# and only 25% of simulations with the largest bias are shown. While t-test 
-# estimates are symmetric about the true effect (left), the plots for the 
-# proportional test (right) reveal bias and asymmetric confidence interval widths. 
-# Vertical dashed lines are at the true value. Horizontal dashed lines are at 
-# the target rejection rate of 5\\%. Note that due to the numeric instability of 
-# the proportional model, p-values are often inconsistent with confidence interval 
-# coverage as can be seen with red intervals (p<0.05) which cover zero in the 
-# upper right panel
+# and only 25\% of simulations with the largest bias are shown. Red intervals in 
+# the top row denote $p<0.05$. Red intervals in the bottom row do not cover the 
+# true simulated value (vertical dashed lines). While $t$-test estimates are 
+# symmetric about the true effect (left), the plots for the proportional test 
+# (right) reveal bias and asymmetric confidence interval widths. Horizontal
+# dashed lines are at the target rejection rate of 5\%. Note that the proportional
+# model p-values are often inconsistent with confidence interval coverage as can
+# be seen with red intervals ($p<0.05$) which cover zero in the upper right panel.
 ttest_t1 <- results %>%
   filter(Beta == -0.5 & Delta == 0 & Approach == 't-test') %>%
   arrange(`Pr(>|t|)`) %>%
@@ -250,9 +250,10 @@ long.means <- expand_grid(
       labels = paste("Scenario", c("A", "B", "C", "D"))))
 
 ## Figure 3. Longitudinal mean trend scenarios ----
-# Four longitudinal mean trend scenarios all with different proportional effects
-# (2/3, 1, 2, Inf) but equivalent linear effects (a difference between 
-# slopes of 0.5 outcome units per 18 months)
+# Four longitudinal mean trend scenarios assumed in simulations. All scenarios 
+# have the same linear effect (a difference between slopes of 0.5 units per 
+# 18 months). Scenarios A to C have finite proportional effects (2/3, 1, 2), 
+# while scenario D, with a control group mean fixed at zero, does not.
 ggplot(long.means, aes(x=month, y=Y, color=Tx)) +
   geom_line() +
   geom_point(aes(shape = Tx)) +
@@ -430,9 +431,9 @@ long.results <- long.results %>%
     `Treatment effect` = factor(`Treatment effect`, levels = c('Slope', 'Proportional')))
 
 ## Table 1. Simulated power, Type I error, and proportion of rejections ----
-# Simulated power, Type I error, and proportion of rejections under the null 
-# that favor active treatment from 10,000 simulated trials under the mean trends
-# shown in Figure 3
+# Simulated power, Type I error, and proportion of rejections under the null that
+# favor active treatment from 10,000 simulated trials under the mean trends shown
+# in Figure 3.
 reject.tx <- long.results %>%
   filter(Effect == 'Type I error') %>%
   filter(!is.na(`p-value`) & `p-value`<0.05) %>%
@@ -455,16 +456,16 @@ long.results %>%
   print(comment = FALSE, include.rownames=FALSE)
 
 ## Figure 4. Zipper plots for for longitudinal Type I error ----
-# Zipper plots [@morris2019using] showing estimates and 95% confidence intervals
-# for longitudinal Type I error simulations. The intervals are sorted so that 
-# those associated with the smallest p-values are toward the top of each panel, 
-# and only the smallest 25% of p-values are shown. While linear model estimates 
-# are symmetric about the zero (left), the plots for the proportional effect 
-# model (right) reveal bias in favor of treatment with a disproportionate number
-# of positive dots. Confidence intervals also appear to be narrower when 
-# proportional effect estimates favor treatment. Vertical dashed lines are at 
-# the true value, zero. Horizontal dashed lines are at the target rejection rate
-# of 5\\%
+# Zipper plots showing estimates and 95\% confidence intervals for longitudinal
+# Type I error simulations. The intervals are sorted so that those associated
+# with the smallest p-values are toward the top of each panel, and only the
+# smallest 25\% of p-values are shown. Red intervals denote $p<0.05$. While the
+# linear "slope" model estimates are symmetric about the zero (left), the plots
+# for the proportional effect model (right) reveal bias in favor of treatment
+# with a disproportionate number of positive dots. Confidence intervals also
+# appear to be narrower when proportional effect estimates favor treatment.
+# Vertical dashed lines are at the true value, zero. Horizontal dashed lines are
+# at the target rejection rate of 5\%.
 pd <- long.results %>%
   filter(Effect == 'Type I error' & `Placebo mean` == 'Unstructured') %>%
   group_by(Scenario, `Treatment effect`) %>%
