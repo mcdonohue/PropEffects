@@ -4,10 +4,10 @@ library(nlme)
 library(parallel)
 
 # Cross-sectional simulations ----
-N <- 100
-S <- 10000
-BETA <- -c(seq(0, 1, by=0.5),100)
-DELTA <- seq(-1, 1, by=0.1)
+N <- 100 # sample size
+S <- 10000 # number of simulated trials
+BETA <- -c(seq(0, 1, by=0.5),100) # control group mean
+DELTA <- seq(-1, 1, by=0.1) # group difference
 
 results <-
   mclapply(BETA, mc.cores = 4, function(Beta){
@@ -222,7 +222,10 @@ gridExtra::grid.arrange(
 
 
 # Longitudinal simulations ----
+rm(list=ls())
+S <- 10000 # number of simulated trials
 ## Define group-level means for four scenarios ----
+# define group-level means for four scenarios ----
 long.means <- expand_grid(
   month = seq(0,18,by=3),
   tx = c(0,1),
@@ -230,29 +233,26 @@ long.means <- expand_grid(
   mutate(
     # control group means
     Y0 = case_when(
-      scenario == 1 ~ -1.5/18 * month,
-      scenario == 2 ~ -1.5/2/18 * month,
-      scenario == 3 ~ -0.5/18 * month,
-      scenario == 4 ~ -0.25/18 * month) %>% 
-        as.numeric(),
+      scenario == 1 ~ -1.5/2/18 * month,
+      scenario == 2 ~ -0.5/18 * month,
+      scenario == 3 ~ -0.25/18 * month,
+      scenario == 4 ~ 0) %>% 
+      as.numeric(),
     # proportional treatment effects
     Y = case_when(
-      scenario == 1 ~ Y0 * (1 - (1/3) * tx),
-      scenario == 2 ~ Y0 * (1 - (2/3) * tx),
-      scenario == 3 ~ Y0 * (1 - (1) * tx),
-      scenario == 4 ~ Y0 * (1 - (2) * tx)) %>% 
-        as.numeric(),
+      scenario == 1 ~ Y0 * (1 - (2/3) * tx),
+      scenario == 2 ~ Y0 * (1 - (1) * tx),
+      scenario == 3 ~ Y0 * (1 - (2) * tx),
+      scenario == 4 ~ Y0 + 0.5/18 * tx * month) %>% 
+      as.numeric(),
     Tx = factor(tx, levels = 1:0, labels = c('Active', 'Control')),
     Scenario = factor(scenario, levels = 1:4,
       labels = paste("Scenario", c("A", "B", "C", "D"))))
 
-
 ## Figure 3. Longitudinal mean trend scenarios ----
 # Four longitudinal mean trend scenarios all with different proportional effects
-# (ranging from 1/3 to 2) but equivalent linear effects (a difference between 
+# (2/3, 1, 2, Inf) but equivalent linear effects (a difference between 
 # slopes of 0.5 outcome units per 18 months)
-slope_effect <- - (-1.5 - (-1.5 * (1 - (1/3))))/18
-
 ggplot(long.means, aes(x=month, y=Y, color=Tx)) +
   geom_line() +
   geom_point(aes(shape = Tx)) +
@@ -264,44 +264,57 @@ ggplot(long.means, aes(x=month, y=Y, color=Tx)) +
   theme(legend.position='inside', legend.position.inside = c(0.1, 0.1)) +
   ggsci::scale_color_nejm()
 
-
-## Expand group-level data to individual-level data ----
+# expand group-level data to individual-level data ----
 ind.long.means <- long.means %>%
   cross_join(tibble(id = 1:200)) %>%
-  mutate(id = tx*200 + id)
+  mutate(
+    id = tx*200 + id,
+    Month = as.factor(month))
+ind.long.means <- ind.long.means %>%
+  bind_cols(model.matrix(id~-1+Month, ind.long.means))
+
 N <- max(ind.long.means$id)
 
-## Define proportional cLDA model ----
+# define proportional slope model ----
 # covariates: month, tx (0 control, 1 active)
 # parameters: Intercept, beta.month, theta
-PcLDA <- function(month, tx, Intercept, beta.month, theta){
+SlopeProp <- function(month, tx, Intercept, beta.month, theta){
   Intercept + month*beta.month*(1-theta*tx) 
 }
 
-## Define function to fit models to simulated data ----
+# define categorical time (unstructured placebo mean) proportional effect model ----
+UnstrSlope <- function(Month3, Month6, Month9, Month12, Month15, Month18, 
+  tx, Intercept, beta3, beta6, beta9, beta12, beta15, beta18, theta){
+  Intercept + (Month3*beta3 + Month6*beta6 + Month9*beta9 + Month12*beta12 +
+      Month15*beta15 + Month18*beta18)*(1-theta*tx)
+}
+
+# define function to fit models to simulated data ----
 # this function is used for both power and type I error simulations
 return.model.results <- function(data){
   lapply(1:4, function(scen){
-    # fit linear model
-    linear.model <- lme(Ysim ~ month + month:tx,
+    ## fit linear slope model ----
+    fit.slope.slope <- lme(Ysim ~ month + month:tx,
       random = ~ 1 | id, data = data %>% filter(scenario == scen))
-
-    # extract estimate and p-value for difference between slopes
-    linear.result <- summary(linear.model)$tTable %>%
+    
+    ## summarize linear slope model ----
+    sum.slope.slope <- summary(fit.slope.slope)$tTable %>%
       as.data.frame() %>%
       rownames_to_column('term') %>%
-      bind_cols(intervals(linear.model)$fixed) %>%
+      bind_cols(intervals(fit.slope.slope)$fixed) %>%
       filter(term == 'month:tx') %>%
-      mutate(Model = 'Linear') %>%
+      mutate(
+        `Placebo mean` = 'Slope',
+        `Treatment effect` = 'Slope') %>%
       select(-Value)
     
-    # use linear model fit for starting values for nonlinear model
-    start1 <- fixef(linear.model)[c("(Intercept)", "month")]
+    ## use linear slope model for starting values for prop. slope model ----
+    start1 <- fixef(fit.slope.slope)[c("(Intercept)", "month")]
     names(start1) <- c("Intercept", "beta.month")
     start1 <- c(start1, theta = 0)
     
-    # fit non-linear proportional effect model
-    nonlin.model <- nlme(Ysim ~ PcLDA(month, tx, Intercept, 
+    ## fit proportional slope model ----
+    fit.slope.prop <- nlme(Ysim ~ SlopeProp(month, tx, Intercept, 
       beta.month, theta) + b0,
       data = data %>% filter(scenario == scen),
       fixed = Intercept + beta.month + theta ~ 1,
@@ -310,18 +323,66 @@ return.model.results <- function(data){
       start = start1,
       control = nlmeControl(returnObject=TRUE))
     
-    # extract proportional effect and p-value
-    nonlin.result <- summary(nonlin.model)$tTable %>%
+    ## summarize proportional slope model ----
+    sum.slope.prop <- summary(fit.slope.prop)$tTable %>%
       as.data.frame() %>%
       rownames_to_column('term') %>%
-      bind_cols(intervals(nonlin.model)$fixed) %>%
+      bind_cols(intervals(fit.slope.prop)$fixed) %>%
       filter(term == 'theta') %>%
-      mutate(Model = 'Proportional effect') %>%
+      mutate(
+        `Placebo mean` = 'Slope',
+        `Treatment effect` = 'Proportional') %>%
+      select(-Value)
+    
+    ## fit linear categorical time model ----
+    fit.unstr.slope <- lme(Ysim ~ Month + month:tx,
+      random = ~ 1 | id, data = data %>% filter(scenario == scen))
+    
+    ## summarize linear categorical time model ----
+    sum.unstr.slope <- summary(fit.unstr.slope)$tTable %>%
+      as.data.frame() %>%
+      rownames_to_column('term') %>%
+      bind_cols(intervals(fit.unstr.slope)$fixed) %>%
+      filter(term == 'month:tx') %>%
+      mutate(
+        `Placebo mean` = 'Unstructured',
+        `Treatment effect` = 'Slope') %>%
+      select(-Value)
+    
+    ## use linear model fit for starting values for nonlinear model ----
+    start1 <- fixef(fit.unstr.slope)[c("(Intercept)",
+      paste0("Month", seq(3, 18, by=3)))]
+    names(start1) <- c("Intercept", paste0("beta", seq(3,18,by=3)))
+    start1 <- c(start1, theta = 0)
+    
+    ## fit proportional categorical time model ----
+    fit.unstr.prop <- nlme(Ysim ~ UnstrSlope(Month3, Month6, Month9, Month12, 
+      Month15, Month18, tx, Intercept, beta3, beta6, beta9, beta12, beta15, beta18, 
+      theta) + b0,
+      data = data %>% filter(scenario == scen),
+      fixed = Intercept + beta3 + beta6 + beta9 + beta12 + beta15 + 
+        beta18 + theta ~ 1,
+      random = list(b0 ~ 1),
+      groups = ~ id,
+      start = start1,
+      control = nlmeControl(returnObject=TRUE))
+    
+    # extract proportional effect and p-value
+    sum.unstr.prop <- summary(fit.unstr.prop)$tTable %>%
+      as.data.frame() %>%
+      rownames_to_column('term') %>%
+      bind_cols(intervals(fit.unstr.prop)$fixed) %>%
+      filter(term == 'theta') %>%
+      mutate(
+        `Placebo mean` = 'Unstructured',
+        `Treatment effect` = 'Proportional') %>%
       select(-Value)
     
     # bundle and return results
-    linear.result %>%
-      bind_rows(nonlin.result) %>%
+    sum.slope.slope %>%
+      bind_rows(sum.slope.prop) %>%
+      bind_rows(sum.unstr.slope) %>%
+      bind_rows(sum.unstr.prop) %>%
       mutate(scenario = scen)
   }) %>% bind_rows()
 }
@@ -331,7 +392,8 @@ return.model.results <- function(data){
 set.seed(20241101)
 SEEDS <- sample(1:2e9, size = 10000, replace = FALSE)
 
-long.results <- mclapply(1:10000, mc.cores=10, function(sim){
+# run simulations ----
+long.results <- parallel::mclapply(1:S, mc.cores=10, function(sim){
   # set seed and simulate residuals and random intercepts
   set.seed(SEEDS[sim])
   dd <- tibble(
@@ -341,10 +403,13 @@ long.results <- mclapply(1:10000, mc.cores=10, function(sim){
     mutate(
       residual = rnorm(n=nrow(ind.long.means), sd=1.5),
       Y.power = Y + rand.int + residual,
-      Y.null = Y0 + rand.int + residual
+      Y.null = Y0 + rand.int + residual 
     )
-
-  # fit models
+  
+  ggplot(dd %>% filter(scenario == 4), aes(x=month, y=Y.null)) +
+    geom_line(aes(color = Tx, group = id))
+  
+  # fit models 
   power.results <- return.model.results(dd %>% rename(Ysim = Y.power)) %>%
     mutate(Effect = 'Power')
   null.results <- return.model.results(dd %>% rename(Ysim = Y.null)) %>%
@@ -360,8 +425,9 @@ long.results <- long.results %>%
     Significance = factor(`p-value` < 0.05,
       levels = c(TRUE, FALSE), labels = c('p<0.05', 'p>0.05')),
     Scenario = factor(scenario, levels = 1:4,
-      labels = paste("Scenario", c("A", "B", "C", "D"))))
-
+      labels = c("A", "B", "C", "D")),
+    `Placebo mean` = factor(`Placebo mean`, levels = c('Slope', 'Unstructured')),
+    `Treatment effect` = factor(`Treatment effect`, levels = c('Slope', 'Proportional')))
 
 ## Table 1. Simulated power, Type I error, and proportion of rejections ----
 # Simulated power, Type I error, and proportion of rejections under the null 
@@ -370,101 +436,25 @@ long.results <- long.results %>%
 reject.tx <- long.results %>%
   filter(Effect == 'Type I error') %>%
   filter(!is.na(`p-value`) & `p-value`<0.05) %>%
-  group_by(Scenario, Model) %>%
+  group_by(Scenario, `Placebo mean`, `Treatment effect`) %>%
   summarise(
     `Proportion of rejections in favor of treatment under the null (%)` = sum(lower > 0)/length(`p-value`)*100)
 
 long.results %>%
-  group_by(Scenario, Model, Effect) %>%
+  group_by(Scenario, `Placebo mean`, `Treatment effect`, Effect) %>%
   filter(!is.na(`p-value`)) %>%
   summarise(
     Percent = sum(`p-value`<0.05)/length(`p-value`)*100,
     `N sims` = length(`p-value`)) %>%
   pivot_wider(values_from = Percent, names_from = 'Effect') %>%
-  left_join(reject.tx, by = c("Scenario", "Model")) %>%
+  left_join(reject.tx, by = c("Scenario", "Placebo mean", "Treatment effect")) %>%
   rename(`Power (%)` = Power, `Type I error (%)` = `Type I error`) %>%
-  select(-`N sims`) %>%
+  filter(`Placebo mean` == 'Unstructured') %>%
+  ungroup() %>%
+  select(!c(`N sims`,`Placebo mean`)) %>%
   print(comment = FALSE, include.rownames=FALSE)
 
-## Figure 4. Zipper plots for longitudinal power ----
-# Zipper plots [@morris2019using] showing estimates and 95% confidence intervals
-# for longitudinal power simulations. The intervals are sorted so that those 
-# associated with the largest standardized bias are toward the top of each panel, 
-# and only the 25% of simulations with the largest bias are shown. While linear 
-# model estimates are symmetric about the true effect (left), the plots for the 
-# proportional effect model (right) reveal bias and asymetrical confidence 
-# interval widths. Confidence intervals also appear to be narrower when 
-# proportional effect estimates favor treatment. Vertical dashed lines are at 
-# the true value. Horizontal dashed lines are at the target rejection rate of 5\\%
-pd <- long.results %>%
-  filter(Effect == 'Power') %>%
-  group_by(Scenario, Model) %>%
-  arrange(`p-value`) %>%
-  mutate(Model = paste(Model, "model"))
-
-p1 <- pd %>% filter(Model == 'Linear model') %>%
-  mutate(`Standardized bias` = abs(`est.` - slope_effect)/`Std.Error`) %>%
-  group_by(Scenario) %>%
-  arrange(`Standardized bias`) %>%
-  mutate(
-    rank = row_number()/length(`p-value`)*100,
-    Coverage = case_when(
-      lower > slope_effect | upper < slope_effect ~ 'Not covered',
-      TRUE ~ 'Covered') %>%
-      factor(levels = c('Not covered', 'Covered'))) %>%
-  filter(rank>=75) %>%
-ggplot(aes(x=`est.`, y=rank, color = Coverage)) +
-  geom_point(alpha=0.1) +
-  geom_errorbar(aes(xmin=lower, xmax=upper), alpha = 0.1) +
-  facet_wrap(vars(Scenario), scales = 'free_x', ncol = 1) +
-  ylab("Standardized bias percentile") +
-  xlab("Estimate") +
-  theme_minimal() +
-  theme(legend.position='inside',
-    legend.position.inside = c(0.95, 0.06),
-    legend.title = element_blank()) +
-  ggsci::scale_color_nejm() +
-  geom_hline(yintercept = 95, linetype = 'dashed') +
-  geom_vline(xintercept = slope_effect, linetype = 'dashed') +
-  ggtitle('Linear model')
-
-maxplot <- 20
-p2 <- pd %>% filter(Model == 'Proportional effect model') %>%
-  mutate(
-    true_theta = case_when(
-      scenario == 1 ~ 1/3,
-      scenario == 2 ~ 2/3,
-      scenario == 3 ~ 1,
-      scenario == 4 ~ 2),
-    `Standardized bias` = abs(`est.` - true_theta)/`Std.Error`,
-    `est.` = case_when(abs(`est.`) > maxplot ~ NA, TRUE ~ `est.`),
-    upper = case_when(upper > maxplot ~ maxplot, TRUE ~ upper),
-    lower = case_when(lower < -maxplot ~ -maxplot, TRUE ~ lower)) %>%
-  group_by(Scenario) %>%
-  arrange(`Standardized bias`) %>%
-  mutate(
-    rank = row_number()/length(`p-value`)*100,
-    Coverage = case_when(
-      lower > true_theta | upper < true_theta ~ 'Covered',
-      TRUE ~ 'Not covered'
-    )) %>%
-  filter(rank>=75) %>%
-  ggplot(aes(x=`est.`, y=rank, color = Coverage)) +
-  geom_point(alpha=0.1) +
-  geom_errorbar(aes(xmin=lower, xmax=upper), alpha = 0.1) +
-  facet_wrap(vars(Scenario), scales = 'free_x', ncol = 1) +
-  ylab("Standardized bias percentile") +
-  xlab("Estimate") +
-  theme_minimal() +
-  theme(legend.position='none') +
-  ggsci::scale_color_nejm() +
-  geom_hline(yintercept = 95, linetype = 'dashed') +
-  geom_vline(aes(xintercept = true_theta), linetype = 'dashed') +
-  ggtitle('Proportional effect model')
-
-gridExtra::grid.arrange(p1, p2, ncol=2)
-
-## Figure 5. Zipper plots for for longitudinal Type I error ----
+## Figure 4. Zipper plots for for longitudinal Type I error ----
 # Zipper plots [@morris2019using] showing estimates and 95% confidence intervals
 # for longitudinal Type I error simulations. The intervals are sorted so that 
 # those associated with the smallest p-values are toward the top of each panel, 
@@ -476,16 +466,17 @@ gridExtra::grid.arrange(p1, p2, ncol=2)
 # the true value, zero. Horizontal dashed lines are at the target rejection rate
 # of 5\\%
 pd <- long.results %>%
-  filter(Effect == 'Type I error') %>%
-  group_by(scenario, Model) %>%
+  filter(Effect == 'Type I error' & `Placebo mean` == 'Unstructured') %>%
+  group_by(Scenario, `Treatment effect`) %>%
   arrange(`p-value`) %>%
   mutate(
     rank = row_number()/length(`p-value`)*100, 
-    Model = paste(Model, "model")) %>%
+    Model = paste(`Treatment effect`, "model"),
+    Scenario = paste("Scenario", Scenario)) %>%
   filter(rank<=25)
 
-p1 <- pd %>% filter(Model == 'Linear model') %>%
-ggplot(aes(x=`est.`, y=rank, color = Significance)) +
+p1 <- pd %>% filter(Model == 'Slope model') %>%
+  ggplot(aes(x=`est.`, y=rank, color = Significance)) +
   geom_point(alpha=0.1) +
   geom_errorbar(aes(xmin=lower, xmax=upper), alpha = 0.1) +
   facet_wrap(vars(Scenario), scales = 'free_x', ncol = 1) +
@@ -511,10 +502,10 @@ ggplot(aes(x=`est.`, y=rank, color = Significance)) +
       x = 0, y = 49, Scenario = 'Scenario D', text = "Favors active group"),
     aes(y=y, x=x, label = text), color = 'black') +
   coord_cartesian(ylim = c(25, 0), clip = "off") +
-  theme(plot.margin = unit(c(0,0,2,0), "lines"))
+  theme(plot.margin = unit(c(1,1,2,1), "lines"))
 
 maxplot <- 20
-p2 <- pd %>% filter(Model == 'Proportional effect model') %>%
+p2 <- pd %>% filter(Model == 'Proportional model') %>%
   mutate(
     `est.` = case_when(abs(`est.`) > maxplot ~ NA, TRUE ~ `est.`),
     upper = case_when(upper > maxplot ~ maxplot, TRUE ~ upper),
@@ -544,8 +535,6 @@ p2 <- pd %>% filter(Model == 'Proportional effect model') %>%
       x = 5, y = 49, Scenario = 'Scenario D', text = "Favors active group"),
     aes(y=y, x=x, label = text), color = 'black') +
   coord_cartesian(ylim = c(25, 0), clip = "off") +
-  theme(plot.margin = unit(c(0,0,2,0), "lines"))
+  theme(plot.margin = unit(c(1,1,2,1), "lines"))
 
 gridExtra::grid.arrange(p1, p2, ncol=2)
-
-
