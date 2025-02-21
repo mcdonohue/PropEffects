@@ -113,7 +113,7 @@ ggplot(aes(x=Estimate, y=rank, color = Significance)) +
   geom_errorbar(aes(xmin=`2.5%`, xmax=`97.5%`), alpha = 0.1) +
   scale_y_reverse() +
   ylab("P-value percentile") +
-  xlab("Estimated mean difference") +
+  xlab("Mean difference") +
   theme_minimal() +
   theme(legend.position='none') +
   ggsci::scale_color_nejm() +
@@ -134,7 +134,7 @@ ggplot(aes(x=Estimate, y=rank, color = Significance)) +
   geom_errorbar(aes(xmin=`2.5%`, xmax=`97.5%`), alpha = 0.1) +
   scale_y_reverse() +
   ylab("P-value percentile") +
-  xlab("Estimated proportional effect") +
+  xlab("Mean difference") +
   theme_minimal() +
   theme(legend.position='none') +
   ggsci::scale_color_nejm() +
@@ -158,7 +158,7 @@ ggplot(aes(x=Estimate, y=rank, color = Coverage)) +
   geom_errorbar(aes(xmin=`2.5%`, xmax=`97.5%`), alpha = 0.1) +
   scale_y_reverse() +
   ylab("Standardized bias percentile") +
-  xlab("Estimated mean difference") +
+  xlab("Mean difference") +
   theme_minimal() +
   theme(legend.position='none') +
   ggsci::scale_color_nejm() +
@@ -194,7 +194,7 @@ ggplot(aes(x=Estimate, y=rank, color = Coverage)) +
   geom_errorbar(aes(xmin=`2.5%`, xmax=`97.5%`), alpha = 0.1) +
   scale_y_reverse() +
   ylab("Standardized bias percentile") +
-  xlab("Estimated proportional effect") +
+  xlab("Mean difference") +
   theme_minimal() +
   theme(legend.position='none') +
   ggsci::scale_color_nejm() +
@@ -482,14 +482,14 @@ p1 <- pd %>% filter(Model == 'Slope model') %>%
   facet_wrap(vars(Scenario), scales = 'free_x', ncol = 1) +
   scale_y_reverse() +
   ylab("P-value percentile") +
-  xlab("Estimated difference in slopes") +
+  xlab("Linear treatment effect (units/month)") +
   theme_minimal() +
   theme(legend.position='none', 
     plot.margin =  unit(c(0.1,0.1,1,0.1), "in")) +
   ggsci::scale_color_nejm() +
   geom_hline(yintercept = 5, linetype = 'dashed') +
   geom_vline(xintercept = 0, linetype = 'dashed') +
-  ggtitle('Linear model')  +
+  ggtitle('Slope model')  +
   geom_segment(
     data = tibble(
       arrowx1 = -0.03, arrowx2 = 0.03, 
@@ -516,7 +516,7 @@ p2 <- pd %>% filter(Model == 'Proportional model') %>%
   scale_y_reverse() +
   facet_wrap(vars(Scenario), scales = 'free_x', ncol = 1) +
   ylab("") +
-  xlab("Proportional effect estimate") +
+  xlab("Proportional treatment effect") +
   theme_minimal() +
   theme(legend.position='none') +
   ggsci::scale_color_nejm() +
